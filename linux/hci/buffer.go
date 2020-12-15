@@ -9,29 +9,30 @@ import (
 type Pool struct {
 	sync.Mutex
 
-	sz  int
-	cnt int
-	ch  chan *bytes.Buffer
+	sz   int
+	cnt  int
+	ch   chan *bytes.Buffer
+	sent chan *bytes.Buffer
 }
 
 // NewPool ...
 func NewPool(sz int, cnt int) *Pool {
 	ch := make(chan *bytes.Buffer, cnt)
+	sent := make(chan *bytes.Buffer, cnt)
 	for len(ch) < cnt {
 		ch <- bytes.NewBuffer(make([]byte, sz))
 	}
-	return &Pool{sz: sz, cnt: cnt, ch: ch}
+	return &Pool{sz: sz, cnt: cnt, ch: ch, sent: sent}
 }
 
 // Client ...
 type Client struct {
-	p    *Pool
-	sent chan *bytes.Buffer
+	p *Pool
 }
 
 // NewClient ...
 func NewClient(p *Pool) *Client {
-	return &Client{p: p, sent: make(chan *bytes.Buffer, p.cnt)}
+	return &Client{p: p}
 }
 
 // LockPool ...
@@ -48,14 +49,14 @@ func (c *Client) UnlockPool() {
 func (c *Client) Get() *bytes.Buffer {
 	b := <-c.p.ch
 	b.Reset()
-	c.sent <- b
+	c.p.sent <- b
 	return b
 }
 
 // Put puts the oldest sent buffer back to the shared pool.
 func (c *Client) Put() {
 	select {
-	case b := <-c.sent:
+	case b := <-c.p.sent:
 		c.p.ch <- b
 	default:
 	}
@@ -65,7 +66,7 @@ func (c *Client) Put() {
 func (c *Client) PutAll() {
 	for {
 		select {
-		case b := <-c.sent:
+		case b := <-c.p.sent:
 			c.p.ch <- b
 		default:
 			return
